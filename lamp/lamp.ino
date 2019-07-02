@@ -9,7 +9,7 @@ String gethey = "http://us-central1-lampfunction.cloudfunctions.net/hey";
 String getareyoucallingme = "http://us-central1-lampfunction.cloudfunctions.net/areyoucallingme";
 String apinfo[2] = {"apmode","123456789"};
 bool wasconnected = 0, apflag = 0,lookfor2 = 0,error = 1;
-int lamplight[2] = {2,HIGH};
+int lamplight[2] = {0,HIGH}, touchSensorGPIO = 5;
 String jsonMessage(String st, String msg){
   String json = "{\"status\":" + st + ",\"message\":\"" + msg + "\"}";
   return json;
@@ -177,6 +177,13 @@ bool reconnectToWifi(){
     Serial.print("http://");
     Serial.print(WiFi.localIP());
     Serial.println("/");
+    if (apflag) {
+      WiFi.softAPdisconnect();
+      delay(200);
+      Serial.println("AP disconnected");
+      WiFi.mode(WIFI_STA);
+      apflag = 0;
+    }
     return 1;
   }
   else{
@@ -196,6 +203,13 @@ bool connectToWifi(){
     Serial.print(WiFi.localIP());
     Serial.println("/");
     wasconnected = 1;
+	  if (apflag) {
+		  WiFi.softAPdisconnect();
+		  delay(200);
+		  Serial.println("AP disconnected");
+		  WiFi.mode(WIFI_STA);
+		  apflag = 0;
+	  }
     return 1;
   }
   else{
@@ -205,9 +219,9 @@ bool connectToWifi(){
 }
 void blinkit(int times,int ondelay,int offdelay){
   for(int i =1;i<times;i++){
-    digitalWrite(2,LOW);
+    digitalWrite(lamplight[0],HIGH);
     delay(ondelay);
-    digitalWrite(2,HIGH);
+    digitalWrite(lamplight[0],LOW);
     delay(offdelay);
   }
 }
@@ -232,9 +246,8 @@ void setup(){
     Serial.begin(115200);
     delay(10);
     pinMode(lamplight[0],OUTPUT);
-    digitalWrite(lamplight[0],lamplight[1]);
+    digitalWrite(lamplight[0],HIGH);
     WiFi.mode(WIFI_AP_STA);
-    digitalWrite(2, HIGH);
     delay(20);
     if(SPIFFS.begin())
       Serial.println("SPIFFS Initialize....ok");
@@ -247,15 +260,26 @@ void setup(){
     server.on("/station", handlestation);
     server.on("/formatspiffs",handleFormatSPIFFS);
     server.begin();
+    pinMode(touchSensorGPIO,INPUT);
 }
+
+unsigned long starttime = millis(),currenttime;
 void loop(){
-  unsigned char val = Serial.read();
+  bool tap = 0,tapgo = 0;
+  
+ // do{
+    tap = digitalRead(touchSensorGPIO);
+    //Serial.print(tap);
+    //if(tap&&!tapgo)
+      //tapgo = 1;
+  //}while(tap);
+  currenttime = millis();
   int httpCode;
   String payload = "",getData;
   if(WiFi.status() == WL_CONNECTED){
-    if(val == 'a'){
+    if(tap){
       if(lamplight[1] == HIGH){
-        digitalWrite(lamplight[0],lamplight[1]);
+        digitalWrite(lamplight[0],LOW);
         getData = gethey + "?state=1";
         httpCode = sendRequestAny(getData,payload);
         if(httpCode !=200 && payload != "200"){
@@ -270,7 +294,7 @@ void loop(){
         digitalWrite(lamplight[0],lamplight[1]);
       }
       else{
-        if(!lookfor2){
+        if(!lookfor2&&!error){
           getData = gethey + "?state=2";
           httpCode = sendRequestAny(getData,payload);
           if(httpCode !=200 && payload != "200"){
@@ -286,7 +310,7 @@ void loop(){
           digitalWrite(lamplight[0],lamplight[1]);
         }
         else{
-          digitalWrite(lamplight[0],lamplight[1]);
+          digitalWrite(lamplight[0],HIGH);
           getData = gethey + "?state=0";
           httpCode = sendRequestAny(getData,payload);
           if(httpCode !=200 && payload != "200"){
@@ -301,7 +325,7 @@ void loop(){
         }
       }
     }
-    else if(!error){
+    else if (!error&& currenttime >= starttime + 2800){
         httpCode = sendRequestAny(getareyoucallingme,payload);
         if(payload == "0" && lamplight[1] == LOW){
           lamplight[1] = HIGH;
@@ -319,15 +343,15 @@ void loop(){
             blinkit(3,250,75);
             error = 1;
           }
-          else
-            error = 0;
           digitalWrite(lamplight[0],lamplight[1]);
         }
-        delay(2800);
+		  starttime = millis();
+        //delay(2800);
     }
   }
   else{
-    if(val == 'a'){
+    if(tap){
+      Serial.print(tap);
       blinkit(3,250,75);
       if(lamplight[1] == HIGH){
         lamplight[1] = LOW;
@@ -338,11 +362,13 @@ void loop(){
         digitalWrite(lamplight[0],lamplight[1]); 
       }
     }
-    if(wasconnected&&WiFi.status()!= WL_CONNECTED){
+    if(wasconnected&&WiFi.status()!= WL_CONNECTED&& currenttime >= starttime + 2800){
       if(ifconnect())
-        if(!reconnectToWifi()&&!apflag)
-          connectToAP();
-      delay(2800);
+        reconnectToWifi();
+      if(WiFi.status()!= WL_CONNECTED&&!apflag)
+         connectToAP();
+      //delay(2800);
+	    starttime = millis();
     }
   }
   server.handleClient();
